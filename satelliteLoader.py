@@ -24,24 +24,42 @@ class satelliteDataSet(data.Dataset):
 
         for file in os.listdir(os.path.join(self.data_dir, 'train/labels')):
             if file.endswith('.json'):
-                self.label_filenames.append(os.path.join(self.data_dir, 'train/labels', file))
+                self.label_filenames.append(os.path.join(file))
 
     def __getitem__(self, idx):
 
-        img_name = os.path.join(self.data_dir, 'train/images', self.label_filenames[idx].replace('.json', 'png'))
-        image = io.imread(img_name)
+        img_name = os.path.join(self.data_dir, 'train/images', self.label_filenames[idx].replace('.json', '.png'))
+        #image = io.imread(img_name)
+        image = plt.imread(img_name).astype(float)
 
         label_name = os.path.join(self.data_dir, 'train/labels', self.label_filenames[idx])
         with open(label_name, "r") as file:
             label = json.load(file)
-        poly = label['features']['xy']
+        features = label['features']['xy']
+
+        buildingsDF = pd.DataFrame(columns=['Poly_X', 'Poly_Y', 'Type', 'UID'])
+        damage_map = {
+            'no-damage': 1,
+            'destroyed': 4,
+        }
+        types = []
 
 
-        landmarks = self.landmarks_frame.iloc[idx, 1:]
-        landmarks = np.array([landmarks])
-        landmarks = landmarks.astype('float').reshape(-1, 2)
+        for i,feature in enumerate(features):
+            type = damage_map[feature['properties']['subtype']]
+            id = feature['properties']['uid']
+            points = feature['wkt'].replace('POLYGON ((', '').replace('))','').split(', ')
+            polygon = [[float(p) for p in pt.split(' ')] for pt in points]
+            polygon = np.array(polygon)
+            polyDF = pd.DataFrame(columns=['Poly_X', 'Poly_Y', 'Type', 'UID'])
+            polyDF['Poly_X'] = polygon[:,0]
+            polyDF['Poly_Y'] = polygon[:,1]
+            polyDF['Type'] = type
+            polyDF['UID'] = id
+            buildingsDF = buildingsDF.append(polyDF)
+            types.append(type)
 
-        sample = {'image': image, 'landmarks': landmarks}
+        sample = {'image': image, 'buildings': buildingsDF}
 
         if self.transform:
             sample = self.transform(sample)
@@ -55,9 +73,20 @@ class satelliteDataSet(data.Dataset):
 
 def show_buildings(image, buildings):
     """Show image with buildings"""
+    damage_colors = {
+        1: 'b',
+        2: 'g',
+        3: 'y',
+        4: 'r',
+    }
     plt.imshow(image)
-    plt.scatter(buildings[:, 0], buildings[:, 1], s=10, marker='.', c='r')
+    buildings['Type'] = buildings['Type'].map(damage_colors)
+    polygons = buildings.groupby(['UID'])
+    for name, poly in polygons:
+        p = plt.Polygon(poly[['Poly_X', 'Poly_Y']], fill=True, color=poly['Type'][0])
+        ax.add_patch(p)
     plt.pause(0.001)  # pause a bit so that plots are updated
+
 
 
 
@@ -69,15 +98,16 @@ if __name__ == '__main__':
     for i in range(len(sat_dataset)):
         sample = sat_dataset[i]
 
-        print(i, sample['image'].shape, sample['landmarks'].shape)
 
-        ax = plt.subplot(1, 4, i + 1)
+        print(i, sample['image'].shape, sample['buildings'].shape)
+
+        ax = plt.subplot(1, 1, i + 1)
         plt.tight_layout()
         ax.set_title('Sample #{}'.format(i))
         ax.axis('off')
         show_buildings(**sample)
 
-        if i == 3:
+        if i == 0:
             plt.show()
             break
 
