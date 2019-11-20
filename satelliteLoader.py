@@ -4,6 +4,7 @@ import json
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import cv2
 import torch
 import torch.utils.data as data
 from torchvision import transforms, datasets
@@ -45,21 +46,26 @@ class satelliteDataSet(data.Dataset):
         types = []
 
 
+        labels = np.zeros(image.shape)
+
+
         for i,feature in enumerate(features):
             type = damage_map[feature['properties']['subtype']]
             id = feature['properties']['uid']
             points = feature['wkt'].replace('POLYGON ((', '').replace('))','').split(', ')
             polygon = [[float(p) for p in pt.split(' ')] for pt in points]
-            polygon = np.array(polygon)
-            polyDF = pd.DataFrame(columns=['Poly_X', 'Poly_Y', 'Type', 'UID'])
-            polyDF['Poly_X'] = polygon[:,0]
-            polyDF['Poly_Y'] = polygon[:,1]
-            polyDF['Type'] = type
-            polyDF['UID'] = id
-            buildingsDF = buildingsDF.append(polyDF)
-            types.append(type)
+            polygon = np.array(polygon,dtype='int32')
+            cv2.fillPoly(labels, [polygon], color=type)
 
-        sample = {'image': image, 'buildings': buildingsDF}
+            #polyDF = pd.DataFrame(columns=['Poly_X', 'Poly_Y', 'Type', 'UID'])
+            #polyDF['Poly_X'] = polygon[:,0]
+            #polyDF['Poly_Y'] = polygon[:,1]
+            #polyDF['Type'] = type
+            #polyDF['UID'] = id
+            #buildingsDF = buildingsDF.append(polyDF)
+            #types.append(type)
+
+        sample = {'image': image, 'labels': labels}
 
         if self.transform:
             sample = self.transform(sample)
@@ -88,7 +94,12 @@ def show_buildings(image, buildings):
     plt.pause(0.001)  # pause a bit so that plots are updated
 
 
-
+label_colors = {
+    1: (0,0,255),
+    2: (0,255,0),
+    3: (255,255,0),
+    4: (255,0,0),
+}
 
 if __name__ == '__main__':
     sat_dataset = satelliteDataSet(data_dir='../data/')
@@ -99,13 +110,19 @@ if __name__ == '__main__':
         sample = sat_dataset[i]
 
 
-        print(i, sample['image'].shape, sample['buildings'].shape)
+        print(i, sample['image'].shape, sample['labels'].shape)
 
         ax = plt.subplot(1, 1, i + 1)
         plt.tight_layout()
         ax.set_title('Sample #{}'.format(i))
         ax.axis('off')
-        show_buildings(**sample)
+        #show_buildings(**sample)
+        #l = sample['labels']
+        #l[l==1] = label_colors[1]
+        #l[l==2] = label_colors[2]
+        #l[l==3] = label_colors[3]
+        #l[l==4] = label_colors[4]
+        plt.imshow(sample['labels'])
 
         if i == 0:
             plt.show()
