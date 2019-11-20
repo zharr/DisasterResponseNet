@@ -23,17 +23,18 @@ class satelliteDataSet(data.Dataset):
         self.transform = transform
         self.label_filenames = []
 
-        for file in os.listdir(os.path.join(self.data_dir, 'train/labels')):
+        for file in os.listdir(os.path.join(self.data_dir, 'labels')):
             if file.endswith('.json'):
                 self.label_filenames.append(os.path.join(file))
 
     def __getitem__(self, idx):
 
-        img_name = os.path.join(self.data_dir, 'train/images', self.label_filenames[idx].replace('.json', '.png'))
+        img_name = os.path.join(self.data_dir, 'images', self.label_filenames[idx].replace('.json', '.png'))
+        print(img_name)
         #image = io.imread(img_name)
         image = plt.imread(img_name).astype(float)
 
-        label_name = os.path.join(self.data_dir, 'train/labels', self.label_filenames[idx])
+        label_name = os.path.join(self.data_dir, 'labels', self.label_filenames[idx])
         with open(label_name, "r") as file:
             label = json.load(file)
         features = label['features']['xy']
@@ -41,20 +42,27 @@ class satelliteDataSet(data.Dataset):
         buildingsDF = pd.DataFrame(columns=['Poly_X', 'Poly_Y', 'Type', 'UID'])
         damage_map = {
             'no-damage': 1,
+            'minor-damage': 2,
+            'major-damage': 3,
             'destroyed': 4,
         }
         types = []
 
 
-        labels = np.zeros(image.shape)
+        labels = np.zeros((image.shape[0],image.shape[1]))
 
 
         for i,feature in enumerate(features):
-            type = damage_map[feature['properties']['subtype']]
+            if 'subtype' in feature['properties'].keys():
+                type = damage_map[feature['properties']['subtype']]
+            else:
+                type = 1
             id = feature['properties']['uid']
             points = feature['wkt'].replace('POLYGON ((', '').replace('))','').split(', ')
             polygon = [[float(p) for p in pt.split(' ')] for pt in points]
             polygon = np.array(polygon,dtype='int32')
+            #label_prob = np.zeros((4))
+            #label_prob[type] = 1
             cv2.fillPoly(labels, [polygon], color=type)
 
             #polyDF = pd.DataFrame(columns=['Poly_X', 'Poly_Y', 'Type', 'UID'])
@@ -65,12 +73,10 @@ class satelliteDataSet(data.Dataset):
             #buildingsDF = buildingsDF.append(polyDF)
             #types.append(type)
 
-        sample = {'image': image, 'labels': labels}
 
-        if self.transform:
-            sample = self.transform(sample)
-
-        return sample
+        #if self.transform:
+        #    image = self.transform(image)
+        return image,labels
 
     def __len__(self):
         return len(self.label_filenames)

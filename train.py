@@ -10,8 +10,9 @@ from torch.optim import lr_scheduler
 from torch.utils.data.sampler import SubsetRandomSampler
 
 from unet_model import UNet
+from satelliteLoader import satelliteDataSet
 
-batch_size = 4
+batch_size = 1
 num_workers = 4
 valid_size = 0.1
 shuffle = True
@@ -34,8 +35,10 @@ data_transforms = {
 data_dir = '../data'
 
 # image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),data_transforms[x]) for x in ['train', 'val']}
-train_dataset = datasets.ImageFolder(os.path.join(data_dir, 'train'), data_transforms['train'])
-val_dataset = datasets.ImageFolder(os.path.join(data_dir, 'train'), data_transforms['val'])
+#train_dataset = datasets.ImageFolder(os.path.join(data_dir, 'train'), data_transforms['train'])
+#val_dataset = datasets.ImageFolder(os.path.join(data_dir, 'train'), data_transforms['val'])
+train_dataset = satelliteDataSet(os.path.join(data_dir, 'train'), data_transforms['train'])
+val_dataset = satelliteDataSet(os.path.join(data_dir, 'train'), data_transforms['val'])
 
 
 num_train = len(train_dataset)
@@ -54,7 +57,7 @@ train_loader = torch.utils.data.DataLoader(
     train_dataset, batch_size=batch_size, sampler=train_sampler,
     num_workers=num_workers
 )
-valid_loader = torch.utils.data.DataLoader(
+val_loader = torch.utils.data.DataLoader(
     val_dataset, batch_size=batch_size, sampler=valid_sampler,
     num_workers=num_workers
 )
@@ -62,15 +65,13 @@ valid_loader = torch.utils.data.DataLoader(
 # dataloaders = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=4, shuffle=True, num_workers=4) for x in ['train', 'val']}
 dataloaders = {
     'train': train_loader,
-    'val': valid_loader,
+    'val': val_loader,
 }
 # dataset_sizes = {x: len(image_datasets[x]) for x in ['train', 'val']}
-dataset_size = {
+dataset_sizes = {
     'train': len(train_dataset),
     'val': len(val_dataset),
 }
-#class_names = image_datasets['train'].classes
-class_names = train_dataset.classes
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -95,7 +96,10 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
             running_corrects = 0
 
             # Iterate over data
-            for inputs, labels in dataloaders[phase]:
+            for inputs,labels in dataloaders[phase]:
+                inputs = inputs.permute(0,3,1,2)
+                inputs = inputs.float()
+                labels = labels.float()
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
@@ -107,7 +111,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
                     _, preds = torch.max(outputs, 1)
-                    loss = criterion(outputs, labels)
+                    loss = criterion(outputs.float(), labels.long())
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -116,7 +120,8 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
 
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data)
+                running_corrects += torch.sum(preds == labels.long().data)
+                break
             if phase == 'train':
                 scheduler.step()
 
