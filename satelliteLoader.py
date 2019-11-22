@@ -30,7 +30,6 @@ class satelliteDataSet(data.Dataset):
     def __getitem__(self, idx):
 
         img_name = os.path.join(self.data_dir, 'images', self.label_filenames[idx].replace('.json', '.png'))
-        print(img_name)
         #image = io.imread(img_name)
         image = plt.imread(img_name).astype(float)
 
@@ -41,10 +40,10 @@ class satelliteDataSet(data.Dataset):
 
         buildingsDF = pd.DataFrame(columns=['Poly_X', 'Poly_Y', 'Type', 'UID'])
         damage_map = {
-            'no-damage': 1,
-            'minor-damage': 2,
-            'major-damage': 3,
-            'destroyed': 4,
+            'no-damage': 0,
+            'minor-damage': 1,
+            'major-damage': 2,
+            'destroyed': 3,
         }
         types = []
 

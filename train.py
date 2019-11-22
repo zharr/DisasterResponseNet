@@ -12,7 +12,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from unet_model import UNet
 from satelliteLoader import satelliteDataSet
 
-batch_size = 1
+batch_size = 16
 num_workers = 4
 valid_size = 0.1
 shuffle = True
@@ -119,9 +119,12 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
                         optimizer.step()    # actually update weights/parameters
 
                 # statistics
-                running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.long().data)
-                break
+                # running_loss += loss.item() * inputs.size(0)
+                # running_corrects += torch.sum(preds == labels.long().data)
+                # running_num_data += labels[labels >= 0].size(0)
+                running_loss += loss.item() * labels[labels >= 0].size(0)
+                running_corrects += torch.sum(preds[labels >= 0] == labels[labels >= 0].data)
+
             if phase == 'train':
                 scheduler.step()
 
