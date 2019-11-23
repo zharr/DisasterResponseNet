@@ -23,7 +23,7 @@ lr = 0.0001
 lr_scheduler_divide_every_n_epochs = 20
 lr_scheduler_type = 'WarmupAndExponentialDecayScheduler'
 lr_scheduler_divisor = 5
-momentum=None
+momentum=0.9
 num_cores = 8
 batch_size = 64
 test_set_batch_size = 128
@@ -155,7 +155,7 @@ def train_unet():
     accuracy = mean(accuracies)
     print('Epoch: {}, Mean Accuracy: {:.2f}%'.format(epoch, accuracy))
     global_step = (epoch - 1) * num_training_steps_per_epoch
-    print('global step: {}'.format(global_step)
+    print('global step: {}'.format(global_step))
 
   return accuracy
 
