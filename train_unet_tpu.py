@@ -23,8 +23,7 @@ from satelliteLoader import satelliteDataSet
 datadir = '../data'
 logdir = '../logs'
 batch_size = 2
-momentum = 0.99
-num_epochs = 18
+num_epochs = 10
 num_cores = 8
 num_workers = 2
 drop_last = True
@@ -57,7 +56,6 @@ def train_unet():
 
   # checkpointing setup
   checkpoint_frequency = log_steps
-  last_checkpoint = 0
 
 
   torch.manual_seed(1)
@@ -131,6 +129,8 @@ def train_unet():
       shuffle=False,
       num_workers=num_workers)
 
+  maxItr = num_epochs * len(train_loader) // train_loader.batch_size + 1
+
   devices = (
       xm.get_xla_supported_devices(
           max_devices=num_cores) if num_cores != 0 else [])
@@ -148,7 +148,8 @@ def train_unet():
     tracker = xm.RateTracker()
 
     model.train()
-    maxItr = len(loader)
+    last_checkpoint = 0
+    best_iou = -float('inf')
     print('# of iterations: {}'.format(maxItr))
     logger.info('# of iterations: {}'.format(maxItr))
     for x, (data, target) in enumerate(loader):
@@ -157,7 +158,7 @@ def train_unet():
       optimizer.zero_grad()
       output = model(data)
       loss = loss_fn(output, target.long())
-      #_, preds = torch.max(output, 1)
+      _, preds = torch.max(output, 1)
       loss.backward()
       xm.optimizer_step(optimizer)
       tracker.add(batch_size)
@@ -166,15 +167,15 @@ def train_unet():
       val_conf = np.zeros((num_classes, num_classes))
       val_conf = val_conf + confusion_matrix(
           target[target >= 0].view(-1).cpu().numpy(),
-          output[target >= 0].view(-1).cpu().numpy())
+          preds[target >= 0].view(-1).cpu().numpy())
       pos = np.sum(val_conf, 1)
       res = np.sum(val_conf, 0)
       tp = np.diag(val_conf)
       iou = np.mean(tp / np.maximum(1, pos + res - tp))
 
+      logger.info('device: {}, x: {}, loss: {}, IoU: {}, tracker_rate: {}, tracker_global_rate: {}'.format(device, x, loss.item(), iou,tracker.rate(), tracker.global_rate()))
       if x % log_steps == 0:
         print('device: {}, x: {}, loss: {}, tracker_rate: {}, tracker_global_rate: {}'.format(device, x, loss.item(), tracker.rate(), tracker.global_rate()))
-        logger.info('device: {}, x: {}, loss: {}, tracker_rate: {}, tracker_global_rate: {}'.format(device, x, loss.item(), tracker.rate(), tracker.global_rate()))
         test_utils.print_training_update(device, x, loss.item(),
                                          tracker.rate(),
                                          tracker.global_rate())
@@ -200,8 +201,10 @@ def train_unet():
     correct = 0
     model.eval()
     for data, target in loader:
+      data = target[0].permute(0,3,1,2)
+      target = target[1] 
       output = model(data)
-      pred = output.max(1, keepdim=True)[1]
+      pred = output.max(1, keepdim=True)[1].float()
       correct += pred.eq(target.view_as(pred)).sum().item()
       total_samples += data.size()[0]
 
@@ -220,7 +223,7 @@ def train_unet():
   for epoch in range(1, num_epochs + 1):
     print(epoch)
     print(train_loader)
-    model_parallel(train_loop_fn, train_loader)
+    #model_parallel(train_loop_fn, train_loader)
     accuracies = model_parallel(test_loop_fn, test_loader)
     accuracy = mean(accuracies)
     print('Epoch: {}, Mean Accuracy: {:.2f}%'.format(epoch, accuracy))
