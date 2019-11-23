@@ -223,7 +223,7 @@ def train_unet():
   for epoch in range(1, num_epochs + 1):
     print(epoch)
     print(train_loader)
-    #model_parallel(train_loop_fn, train_loader)
+    model_parallel(train_loop_fn, train_loader)
     accuracies = model_parallel(test_loop_fn, test_loader)
     accuracy = mean(accuracies)
     print('Epoch: {}, Mean Accuracy: {:.2f}%'.format(epoch, accuracy))
