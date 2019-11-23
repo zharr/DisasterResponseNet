@@ -32,6 +32,7 @@ class satelliteDataSet(data.Dataset):
         img_name = os.path.join(self.data_dir, 'images', self.label_filenames[idx].replace('.json', '.png'))
         #image = io.imread(img_name)
         image = plt.imread(img_name).astype(float)
+        #print('inital read of image: {} : {}'.format(img_name, image))
 
         label_name = os.path.join(self.data_dir, 'labels', self.label_filenames[idx])
         with open(label_name, "r") as file:
@@ -60,21 +61,18 @@ class satelliteDataSet(data.Dataset):
             points = feature['wkt'].replace('POLYGON ((', '').replace('))','').split(', ')
             polygon = [[float(p) for p in pt.split(' ')] for pt in points]
             polygon = np.array(polygon,dtype='int32')
-            #label_prob = np.zeros((4))
-            #label_prob[type] = 1
             cv2.fillPoly(labels, [polygon], color=type)
-
-            #polyDF = pd.DataFrame(columns=['Poly_X', 'Poly_Y', 'Type', 'UID'])
-            #polyDF['Poly_X'] = polygon[:,0]
-            #polyDF['Poly_Y'] = polygon[:,1]
-            #polyDF['Type'] = type
-            #polyDF['UID'] = id
-            #buildingsDF = buildingsDF.append(polyDF)
-            #types.append(type)
 
 
         #if self.transform:
         #    image = self.transform(image)
+        #print('image after transform')
+        #print(image)
+        try:
+            if image == 0:
+                print(img_name)
+        except:
+            pass
         return image,labels
 
     def __len__(self):
