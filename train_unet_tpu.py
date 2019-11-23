@@ -12,20 +12,19 @@ import torch_xla.distributed.data_parallel as dp
 import torch_xla.debug.metrics as met
 import torch_xla.utils.utils as xu
 import torch_xla.core.xla_model as xm
-import torch_xla.test.test_utils as test_utils
+import test_utils
 from unet_model import UNet
 from satelliteLoader import satelliteDataSet
 
 datadir = '../data'
 logdir = '../logs'
-batch_size = 128
-momentum = 0.5
-lr = 0.01
+batch_size = 2
+momentum = 0.99
 num_epochs = 18
 num_cores = 8
-num_workers = 12
+num_workers = 2
 drop_last = True
-log_steps = 10
+log_steps = 1
 metrics_debug = True
 
 
@@ -105,26 +104,31 @@ def train_unet():
       xm.get_xla_supported_devices(
           max_devices=num_cores) if num_cores != 0 else [])
   # Scale learning rate to num cores
+  lr = 0.01
   lr = lr * max(len(devices), 1)
   # Pass [] as device_ids to run using the PyTorch/CPU engine.
   model_parallel = dp.DataParallel(UNet, device_ids=devices)
 
   def train_loop_fn(model, loader, device, context):
-    loss_fn = nn.NLLLoss()
+    loss_fn = nn.CrossEntropyLoss()
     optimizer = context.getattr_or(
         'optimizer',
-        lambda: optim.SGD(model.parameters(), lr=lr, momentum=momentum))
+        lambda: optim.Adam(model.parameters(), lr=lr))
     tracker = xm.RateTracker()
 
     model.train()
     for x, (data, target) in enumerate(loader):
+      data = target[0].permute(0,3,1,2)
+      target = target[1]
       optimizer.zero_grad()
       output = model(data)
-      loss = loss_fn(output, target)
+      loss = loss_fn(output, target.long())
+      #_, preds = torch.max(output, 1)
       loss.backward()
       xm.optimizer_step(optimizer)
       tracker.add(batch_size)
       if x % log_steps == 0:
+        print('device: {}, x: {}, loss: {}, tracker_rate: {}, tracker_global_rate: {}'.format(device, x, loss.item(), tracker.rate(), tracker.global_rate()))
         test_utils.print_training_update(device, x, loss.item(),
                                          tracker.rate(),
                                          tracker.global_rate())
@@ -149,7 +153,10 @@ def train_unet():
       xm.xla_replication_devices(devices)) if len(devices) > 1 else 1
   num_training_steps_per_epoch = train_dataset_len // (
       batch_size * num_devices)
+  print('total epochs: {}'.format(num_epochs))
   for epoch in range(1, num_epochs + 1):
+    print(epoch)
+    print(train_loader)
     model_parallel(train_loop_fn, train_loader)
     accuracies = model_parallel(test_loop_fn, test_loader)
     accuracy = mean(accuracies)
