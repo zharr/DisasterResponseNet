@@ -1,7 +1,10 @@
 import os
 from statistics import mean
 import shutil
+import sys
 import time
+import logging
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,6 +15,7 @@ import torch_xla.distributed.data_parallel as dp
 import torch_xla.debug.metrics as met
 import torch_xla.utils.utils as xu
 import torch_xla.core.xla_model as xm
+from sklearn.metrics import confusion_matrix
 import test_utils
 from unet_model import UNet
 from satelliteLoader import satelliteDataSet
@@ -24,11 +28,38 @@ num_epochs = 18
 num_cores = 8
 num_workers = 2
 drop_last = True
-log_steps = 1
+log_steps = 25
 metrics_debug = True
+num_classes = 4
 
+def initializeLogging(log_filename, logger_name):
+  log = logging.getLogger(logger_name)
+  log.setLevel(logging.DEBUG)
+  log.addHandler(logging.StreamHandler(sys.stdout))
+  log.addHandler(logging.FileHandler(log_filename, mode='a'))
+
+  return log
+
+def save_checkpoint(state, is_best, checkpoint_folder=logdir,
+                filename='checkpoint.pth.tar'):
+  filename = os.path.join(checkpoint_folder, filename)
+  best_model_filename = os.path.join(checkpoint_folder, 'model_best.pth.tar')
+  torch.save(state, filename)
+  if is_best:
+    shutil.copyfile(filename, best_model_filename)
 
 def train_unet():
+
+  # logging setup
+  logger_name = 'train_logger'
+  logger = initializeLogging(os.path.join(logdir,
+                'train_history.txt'), logger_name)
+
+  # checkpointing setup
+  checkpoint_frequency = log_steps
+  last_checkpoint = 0
+
+
   torch.manual_seed(1)
 
   '''
@@ -117,6 +148,9 @@ def train_unet():
     tracker = xm.RateTracker()
 
     model.train()
+    maxItr = len(loader)
+    print('# of iterations: {}'.format(maxItr))
+    logger.info('# of iterations: {}'.format(maxItr))
     for x, (data, target) in enumerate(loader):
       data = target[0].permute(0,3,1,2)
       target = target[1]
@@ -127,11 +161,39 @@ def train_unet():
       loss.backward()
       xm.optimizer_step(optimizer)
       tracker.add(batch_size)
+
+      # compute the confusion matrix and IoU
+      val_conf = np.zeros((num_classes, num_classes))
+      val_conf = val_conf + confusion_matrix(
+          target[target >= 0].view(-1).cpu().numpy(),
+          output[target >= 0].view(-1).cpu().numpy())
+      pos = np.sum(val_conf, 1)
+      res = np.sum(val_conf, 0)
+      tp = np.diag(val_conf)
+      iou = np.mean(tp / np.maximum(1, pos + res - tp))
+
       if x % log_steps == 0:
         print('device: {}, x: {}, loss: {}, tracker_rate: {}, tracker_global_rate: {}'.format(device, x, loss.item(), tracker.rate(), tracker.global_rate()))
+        logger.info('device: {}, x: {}, loss: {}, tracker_rate: {}, tracker_global_rate: {}'.format(device, x, loss.item(), tracker.rate(), tracker.global_rate()))
         test_utils.print_training_update(device, x, loss.item(),
                                          tracker.rate(),
                                          tracker.global_rate())
+
+      if x % checkpoint_frequency == 0 or x == maxItr - 1:
+          is_best = iou > best_iou
+          if is_best:
+              best_iou = iou
+
+          do_checkpoint = (x - last_checkpoint) >= checkpoint_frequency
+          if is_best or x == maxItr - 1 or do_checkpoint:
+              last_checkpoint = x
+              checkpoint_dict = {
+                  'itr': x + 1,
+                  'state_dict': model.state_dict(),
+                  'optimizer': optimizer.state_dict(),
+                  'best_iou': best_iou
+              }
+              save_checkpoint(checkpoint_dict, is_best, checkpoint_folder=logdir)
 
   def test_loop_fn(model, loader, device, context):
     total_samples = 0
@@ -145,6 +207,7 @@ def train_unet():
 
     accuracy = 100.0 * correct / total_samples
     test_utils.print_test_update(device, accuracy)
+    logger.info('TEST: device: {}, accuracy: {}'.format(device, accuracy))
     return accuracy
 
   accuracy = 0.0
@@ -161,11 +224,13 @@ def train_unet():
     accuracies = model_parallel(test_loop_fn, test_loader)
     accuracy = mean(accuracies)
     print('Epoch: {}, Mean Accuracy: {:.2f}%'.format(epoch, accuracy))
+    logger.info('Epoch: {}, Mean Accuracy: {:.2f}%'.format(epoch, accuracy))
     global_step = (epoch - 1) * num_training_steps_per_epoch
     test_utils.add_scalar_to_summary(writer, 'Accuracy/test', accuracy,
                                      global_step)
     if metrics_debug:
       print(met.metrics_report())
+      logger.info(met.metrics_report())
 
   test_utils.close_summary_writer(writer)
   return accuracy
