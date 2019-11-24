@@ -135,7 +135,7 @@ def train_unet():
       xm.get_xla_supported_devices(
           max_devices=num_cores) if num_cores != 0 else [])
   # Scale learning rate to num cores
-  lr = 0.01
+  lr = 0.0001
   lr = lr * max(len(devices), 1)
   # Pass [] as device_ids to run using the PyTorch/CPU engine.
   model_parallel = dp.DataParallel(UNet, device_ids=devices)
@@ -148,53 +148,42 @@ def train_unet():
     tracker = xm.RateTracker()
 
     model.train()
-    last_checkpoint = 0
-    best_iou = -float('inf')
     print('# of iterations: {}'.format(maxItr))
     logger.info('# of iterations: {}'.format(maxItr))
+    optimizer.zero_grad()
     for x, (data, target) in enumerate(loader):
       data = target[0].permute(0,3,1,2)
       target = target[1]
-      optimizer.zero_grad()
       output = model(data)
       loss = loss_fn(output, target.long())
-      _, preds = torch.max(output, 1)
+      #_, preds = torch.max(output, 1)
       loss.backward()
-      xm.optimizer_step(optimizer)
+      
+      # backprop every log_step iterations
+      if x % log_steps == 0:
+        xm.optimizer_step(optimizer)
+        optimizer.zero_grad()
+
       tracker.add(batch_size)
 
       # compute the confusion matrix and IoU
-      val_conf = np.zeros((num_classes, num_classes))
-      val_conf = val_conf + confusion_matrix(
-          target[target >= 0].view(-1).cpu().numpy(),
-          preds[target >= 0].view(-1).cpu().numpy())
-      pos = np.sum(val_conf, 1)
-      res = np.sum(val_conf, 0)
-      tp = np.diag(val_conf)
-      iou = np.mean(tp / np.maximum(1, pos + res - tp))
+      #print(preds.shape)
+      #print(target.shape)
+      
+      #val_conf = np.zeros((num_classes, num_classes))
+      #val_conf = val_conf + confusion_matrix(
+      #    target[target >= 0].view(-1).cpu().numpy(),
+      #    preds[target >= 0].view(-1).cpu().numpy())
+      #pos = np.sum(val_conf, 1)
+      #res = np.sum(val_conf, 0)
+      #tp = np.diag(val_conf)
+      #iou = np.mean(tp / np.maximum(1, pos + res - tp))
 
-      logger.info('device: {}, x: {}, loss: {}, IoU: {}, tracker_rate: {}, tracker_global_rate: {}'.format(device, x, loss.item(), iou,tracker.rate(), tracker.global_rate()))
+      #logger.info('device: {}, x: {}, loss: {}, tracker_rate: {}, tracker_global_rate: {}'.format(device, x, loss.item(), tracker.rate(), tracker.global_rate()))
+      print('device: {}, x: {}, loss: {}, tracker_rate: {}, tracker_global_rate: {}'.format(device, x, loss.item(), tracker.rate(), tracker.global_rate()))
+      
       if x % log_steps == 0:
-        print('device: {}, x: {}, loss: {}, tracker_rate: {}, tracker_global_rate: {}'.format(device, x, loss.item(), tracker.rate(), tracker.global_rate()))
-        test_utils.print_training_update(device, x, loss.item(),
-                                         tracker.rate(),
-                                         tracker.global_rate())
-
-      if x % checkpoint_frequency == 0 or x == maxItr - 1:
-          is_best = iou > best_iou
-          if is_best:
-              best_iou = iou
-
-          do_checkpoint = (x - last_checkpoint) >= checkpoint_frequency
-          if is_best or x == maxItr - 1 or do_checkpoint:
-              last_checkpoint = x
-              checkpoint_dict = {
-                  'itr': x + 1,
-                  'state_dict': model.state_dict(),
-                  'optimizer': optimizer.state_dict(),
-                  'best_iou': best_iou
-              }
-              save_checkpoint(checkpoint_dict, is_best, checkpoint_folder=logdir)
+        logger.info('device: {}, x: {}, loss: {}, tracker_rate: {}, tracker_global_rate: {}'.format(device, x, loss.item(), tracker.rate(), tracker.global_rate()))
 
   def test_loop_fn(model, loader, device, context):
     total_samples = 0
@@ -204,9 +193,12 @@ def train_unet():
       data = target[0].permute(0,3,1,2)
       target = target[1] 
       output = model(data)
-      pred = output.max(1, keepdim=True)[1].float()
-      correct += pred.eq(target.view_as(pred)).sum().item()
-      total_samples += data.size()[0]
+      #pred = output.max(1, keepdim=True)[1].float()
+      _, preds = torch.max(output, 1)
+      preds = preds.float()
+      correct += preds.eq(target.view_as(preds)).sum().item()
+      total_samples += target.shape[1]**2
+      print('device: {}, Running Accuracy: {}'.format(device, correct/total_samples))
 
     accuracy = 100.0 * correct / total_samples
     test_utils.print_test_update(device, accuracy)
@@ -220,20 +212,29 @@ def train_unet():
   num_training_steps_per_epoch = train_dataset_len // (
       batch_size * num_devices)
   print('total epochs: {}'.format(num_epochs))
+
   for epoch in range(1, num_epochs + 1):
     print(epoch)
     print(train_loader)
+    
     model_parallel(train_loop_fn, train_loader)
     accuracies = model_parallel(test_loop_fn, test_loader)
     accuracy = mean(accuracies)
+    
     print('Epoch: {}, Mean Accuracy: {:.2f}%'.format(epoch, accuracy))
     logger.info('Epoch: {}, Mean Accuracy: {:.2f}%'.format(epoch, accuracy))
+    
     global_step = (epoch - 1) * num_training_steps_per_epoch
-    test_utils.add_scalar_to_summary(writer, 'Accuracy/test', accuracy,
-                                     global_step)
+
     if metrics_debug:
       print(met.metrics_report())
       logger.info(met.metrics_report())
+      
+    logger.info('saving checkpoint. epoch: {}'.format(epoch))
+    torch.save(model_parallel, os.path.join(logdir,'model_parallel_chkpt.pt'))
+    logger.info('checkpoint saved. epoch: {}'.format(epoch))
+       
+
 
   test_utils.close_summary_writer(writer)
   return accuracy
