@@ -2,20 +2,25 @@ import time
 import copy
 import os
 import numpy as np
+import logging
+import sys
 import torch
 from torchvision import transforms, datasets
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
 from torch.utils.data.sampler import SubsetRandomSampler
-
+from tqdm import tqdm
 from unet_model import UNet
 from satelliteLoader import satelliteDataSet
 
-batch_size = 16
+batch_size = 1
 num_workers = 4
 valid_size = 0.1
 shuffle = True
+log_steps = 25
+metrics_debug = True
+
 
 data_transforms = {
     'train': transforms.Compose([
@@ -33,6 +38,8 @@ data_transforms = {
 }
 
 data_dir = '../data'
+logdir = '../logs'
+
 
 # image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),data_transforms[x]) for x in ['train', 'val']}
 #train_dataset = datasets.ImageFolder(os.path.join(data_dir, 'train'), data_transforms['train'])
@@ -73,14 +80,42 @@ dataset_sizes = {
     'val': len(val_dataset),
 }
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
+def initializeLogging(log_filename, logger_name):
+  log = logging.getLogger(logger_name)
+  log.setLevel(logging.DEBUG)
+  log.addHandler(logging.StreamHandler(sys.stdout))
+  log.addHandler(logging.FileHandler(log_filename, mode='a'))
+
+  return log
+
+'''
+def save_checkpoint(state, is_best, checkpoint_folder=logdir,
+                filename='checkpoint.pth.tar'):
+  filename = os.path.join(checkpoint_folder, filename)
+  best_model_filename = os.path.join(checkpoint_folder, 'model_best.pth.tar')
+  torch.save(state, filename)
+  if is_best:
+    shutil.copyfile(filename, best_model_filename)
+'''
+
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+print(device)
 def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
     since = time.time()
 
+    # logging setup
+    logger_name = 'train_logger'
+    logger = initializeLogging(os.path.join(logdir,
+                'train_history.txt'), logger_name)
+
+    #  checkpointing setup
+    checkpoint_frequency = log_steps
+    logger.info('started model training')
+
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
-
+    
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs-1))
         print('-'*10)
@@ -94,9 +129,9 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
 
             running_loss = 0.0
             running_corrects = 0
-
+            print(phase + ' size: ', str(dataset_sizes[phase]))
             # Iterate over data
-            for inputs,labels in dataloaders[phase]:
+            for inputs,labels in tqdm(dataloaders[phase]):
                 inputs = inputs.permute(0,3,1,2)
                 inputs = inputs.float()
                 labels = labels.float()
@@ -112,25 +147,33 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
                     outputs = model(inputs)
                     _, preds = torch.max(outputs, 1)
                     loss = criterion(outputs.float(), labels.long())
-
+                    preds = preds.float()
+                    running_corrects += preds.eq(labels.view_as(preds)).sum().item()
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()     # back propagation
                         optimizer.step()    # actually update weights/parameters
-
+                #print(running_corrects, loss)
                 # statistics
                 # running_loss += loss.item() * inputs.size(0)
                 # running_corrects += torch.sum(preds == labels.long().data)
                 # running_num_data += labels[labels >= 0].size(0)
-                running_loss += loss.item() * labels[labels >= 0].size(0)
-                running_corrects += torch.sum(preds[labels >= 0] == labels[labels >= 0].data)
-
+                running_loss += loss.item()
+                #running_corrects += torch.sum(preds[labels >= 0] == labels[labels >= 0].data)
             if phase == 'train':
                 scheduler.step()
 
             epoch_loss = running_loss / dataset_sizes[phase]
-            epoch_acc = running_corrects.double() / dataset_sizes[phase]
-
+            epoch_acc = running_corrects / dataset_sizes[phase]
+            if epoch_acc > best_acc:
+                checkpoint_dict = {
+                        'state_dict': model.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                        'best_acc': epoch_acc,
+                        'epoch_loss': epoch_loss
+                        }
+                best_acc = epoch_acc
+                torch.save(checkpoint_dict, 'best_model.pt')
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(
                 phase, epoch_loss, epoch_acc
             ))
