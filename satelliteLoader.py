@@ -30,6 +30,7 @@ class satelliteDataSet(data.Dataset):
     def __getitem__(self, idx):
 
         img_name = os.path.join(self.data_dir, 'images', self.label_filenames[idx].replace('.json', '.png'))
+        #print(img_name)
         #image = io.imread(img_name)
         image = plt.imread(img_name).astype(float)
         #print('inital read of image: {} : {}'.format(img_name, image))
@@ -41,10 +42,11 @@ class satelliteDataSet(data.Dataset):
 
         buildingsDF = pd.DataFrame(columns=['Poly_X', 'Poly_Y', 'Type', 'UID'])
         damage_map = {
-            'no-damage': 0,
-            'minor-damage': 1,
-            'major-damage': 2,
-            'destroyed': 3,
+            'background': 0,
+            'no-damage': 1,
+            'minor-damage': 2,
+            'major-damage': 3,
+            'destroyed': 4,
         }
         types = []
 
@@ -105,31 +107,32 @@ label_colors = {
 }
 
 if __name__ == '__main__':
-    sat_dataset = satelliteDataSet(data_dir='../data/')
+    sat_dataset = satelliteDataSet(data_dir='../data/poster')
 
     fig = plt.figure()
 
     for i in range(len(sat_dataset)):
-        sample = sat_dataset[i]
+        image, label = sat_dataset[i]
 
 
-        print(i, sample['image'].shape, sample['labels'].shape)
-        print(np.max(sample['image']))
-        print(np.min(sample['image']))
+        print(i, image.shape, image.shape)
+        print(np.max(image))
+        print(np.min(image))
 
-        ax = plt.subplot(1, 1, i + 1)
+        #ax = plt.subplot(1, 1, i + 1)
         plt.tight_layout()
-        ax.set_title('Sample #{}'.format(i))
-        ax.axis('off')
+        #ax.set_title('Sample #{}'.format(i))
+        #ax.axis('off')
         #show_buildings(**sample)
         #l = sample['labels']
         #l[l==1] = label_colors[1]
         #l[l==2] = label_colors[2]
         #l[l==3] = label_colors[3]
         #l[l==4] = label_colors[4]
-        plt.imshow(sample['labels'])
+        plt.imshow(label)
+        plt.clim(0,4)
 
-        if i == 0:
-            plt.show()
-            break
+        #if i == 0:
+        plt.show()
+        #break
 
