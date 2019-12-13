@@ -21,18 +21,28 @@ shuffle = True
 log_steps = 25
 metrics_debug = True
 
+class FCLayer(nn.module):
+    def __init__(self):
+        super(FCLayer,self).__init__()
+        f1 = nn.Linear(1024,1024)
+        relu1 = nn.ReLU()
+
+    def forward(self, x):
+        x = self.f1(x)
+        x = self.relu1(x)
+        return x
 
 data_transforms = {
     'train': transforms.Compose([
-        transforms.RandomResizedCrop(1024),
+        #transforms.RandomResizedCrop(1024),
         transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
+        #transforms.ToTensor(),
         # transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
     'val': transforms.Compose([
         # transforms.Resize(256),
-        transforms.CenterCrop(1024),
-        transforms.ToTensor(),
+        #transforms.CenterCrop(1024),
+        #transforms.ToTensor(),
         # transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ]),
 }
@@ -140,14 +150,15 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
-
+                
                 # forward
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
                     _, preds = torch.max(outputs, 1)
                     loss = criterion(outputs.float(), labels.long())
-                    preds = preds.float()
+                    preds = preds.float()#.cpu()
+                    #labels = labels.cpu()
                     running_corrects += preds.eq(labels.view_as(preds)).sum().item()
                     # backward + optimize only if in training phase
                     if phase == 'train':
@@ -155,16 +166,16 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
                         optimizer.step()    # actually update weights/parameters
                 #print(running_corrects, loss)
                 # statistics
-                # running_loss += loss.item() * inputs.size(0)
+                running_loss += loss.item() * inputs.size(0)
                 # running_corrects += torch.sum(preds == labels.long().data)
                 # running_num_data += labels[labels >= 0].size(0)
-                running_loss += loss.item()
+                #running_loss += loss.item()
                 #running_corrects += torch.sum(preds[labels >= 0] == labels[labels >= 0].data)
             if phase == 'train':
                 scheduler.step()
 
             epoch_loss = running_loss / dataset_sizes[phase]
-            epoch_acc = running_corrects / dataset_sizes[phase]
+            epoch_acc = running_corrects / (dataset_sizes[phase]*(inputs.size(2)**2))
             if epoch_acc > best_acc:
                 checkpoint_dict = {
                         'state_dict': model.state_dict(),
@@ -194,8 +205,15 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
     model.load_state_dict(best_model_wts)
     return model
 
+
+def train_second_layer(model, criterion, optimizer, scheduler, num_epochs=25):
+    model1 = UNet()
+    model2 = UNet()
+    model1.load_state_dict(best_model_wts)
+    model2.load_state_dict(best_model_wts)
+
 if __name__ == '__main__':
-    lr = 0.001
+    lr = 0.0001
     model = UNet()
     #num_ftrs = model.fc.in_features
     # Here the size of each output sample is set to 2
