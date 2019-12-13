@@ -195,7 +195,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
     return model
 
 if __name__ == '__main__':
-    lr = 0.001
+    lr = 0.0001
     model = UNet()
     #num_ftrs = model.fc.in_features
     # Here the size of each output sample is set to 2
