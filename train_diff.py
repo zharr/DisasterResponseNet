@@ -13,6 +13,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from tqdm import tqdm
 from unet_model import UNet
 from satelliteLoader import satelliteDataSet
+from satelliteLoaderDiff import satelliteDataSetDiff
 
 batch_size = 1
 num_workers = 4
@@ -43,8 +44,8 @@ logdir = '../logs'
 # image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x),data_transforms[x]) for x in ['train', 'val']}
 #train_dataset = datasets.ImageFolder(os.path.join(data_dir, 'train'), data_transforms['train'])
 #val_dataset = datasets.ImageFolder(os.path.join(data_dir, 'train'), data_transforms['val'])
-train_dataset = satelliteDataSet(os.path.join(data_dir, 'train'), data_transforms['train'])
-val_dataset = satelliteDataSet(os.path.join(data_dir, 'train'), data_transforms['val'])
+train_dataset = satelliteDataSetDiff(os.path.join(data_dir, 'train'), data_transforms['train'])
+val_dataset = satelliteDataSetDiff(os.path.join(data_dir, 'train'), data_transforms['val'])
 
 
 num_train = len(train_dataset)
@@ -131,7 +132,8 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
             print(phase + ' size: ', str(dataset_sizes[phase]))
             # Iterate over data
             for inputs,labels in tqdm(dataloaders[phase]):
-                inputs = inputs.permute(0,3,1,2)
+                inputs = inputs.unsqueeze(1)
+                #inputs = inputs.permute(0,3,1,2)
                 inputs = inputs.float()
                 labels = labels.float()
                 inputs = inputs.to(device)
@@ -144,30 +146,21 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
-                    preds = torch.softmax(outputs, 1)
-                    preds = preds.squeeze(0).permute(1,2,0)
-                    dist = torch.distributions.Categorical(preds)
-                    preds = dist.sample()
-                    preds = preds.unsqueeze(0)
+                    _, preds = torch.max(outputs, 1)
                     loss = criterion(outputs.float(), labels.long())
-                    preds = preds.float()#.cpu()
-                    #labels = labels.cpu()
+                    preds = preds.float()
                     running_corrects += preds.eq(labels.view_as(preds)).sum().item()
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()     # back propagation
                         optimizer.step()    # actually update weights/parameters
-                #print(running_corrects, loss)
                 # statistics
-                # running_corrects += torch.sum(preds == labels.long().data)
-                # running_num_data += labels[labels >= 0].size(0)
                 running_loss += loss.item()
-                #running_loss += loss.item()
-                #running_corrects += torch.sum(preds[labels >= 0] == labels[labels >= 0].data)
             if phase == 'train':
                 scheduler.step()
+
             epoch_loss = running_loss / dataset_sizes[phase]
-            epoch_acc = running_corrects / (dataset_sizes[phase]*1024*1024)
+            epoch_acc = running_corrects / dataset_sizes[phase]
             if epoch_acc > best_acc:
                 checkpoint_dict = {
                         'state_dict': model.state_dict(),
@@ -176,7 +169,7 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
                         'epoch_loss': epoch_loss
                         }
                 best_acc = epoch_acc
-                torch.save(checkpoint_dict, 'best_model.pt')
+                torch.save(checkpoint_dict, 'best_model_diff.pt')
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(
                 phase, epoch_loss, epoch_acc
             ))
@@ -198,15 +191,11 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
     return model
 
 
-def train_second_layer(model, criterion, optimizer, scheduler, num_epochs=25):
-    model1 = UNet()
-    model2 = UNet()
-    model1.load_state_dict(best_model_wts)
-    model2.load_state_dict(best_model_wts)
 
 if __name__ == '__main__':
-    lr = 0.0001
-    model = UNet()
+    lr = 0.001
+    model = UNet(n_channels=1)
+
     #num_ftrs = model.fc.in_features
     # Here the size of each output sample is set to 2
     # Alternatively it can be generalized to nn.Linear(num_ftrs, len(class_names))
