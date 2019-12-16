@@ -145,7 +145,11 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
-                    _, preds = torch.max(outputs, 1)
+                    preds = torch.softmax(outputs, 1)
+                    preds = preds.squeeze(0).permute(1,2,0)
+                    dist = torch.distributions.Categorical(preds)
+                    preds = dist.sample()
+                    preds = preds.unsqueeze(0)
                     loss = criterion(outputs.float(), labels.long())
                     preds = preds.float()
                     running_corrects += preds.eq(labels.view_as(preds)).sum().item()
@@ -159,12 +163,10 @@ def train_model(model, criterion, optimizer, scheduler, num_epochs=25):
                 # running_corrects += torch.sum(preds == labels.long().data)
                 # running_num_data += labels[labels >= 0].size(0)
                 running_loss += loss.item()
-                #running_corrects += torch.sum(preds[labels >= 0] == labels[labels >= 0].data)
             if phase == 'train':
                 scheduler.step()
-
             epoch_loss = running_loss / dataset_sizes[phase]
-            epoch_acc = running_corrects / dataset_sizes[phase]
+            epoch_acc = running_corrects / (dataset_sizes[phase]*1024*1024)
             if epoch_acc > best_acc:
                 checkpoint_dict = {
                         'state_dict': model.state_dict(),
