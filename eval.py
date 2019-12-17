@@ -8,7 +8,7 @@ from unet_model import UNet
 
 #device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 device = 'cpu'
-best_model_name = 'best_model.pt'
+best_model_name = 'sample_model.pt'
 best_model = torch.load(best_model_name)
 
 model = UNet()
@@ -35,8 +35,16 @@ for i in range(len(test_images)):
     image_one = image_one.unsqueeze(0).permute(0,3,1,2)
 
     output = model(image_one)
-    _, preds = torch.max(output, 1)
-    output = output.squeeze(0).permute(1,2,0).detach().numpy()
+    preds = torch.softmax(output,1)
+    #_,preds = torch.max(preds,1)
+    preds = preds.squeeze(0).permute(1,2,0)
+    dist = torch.distributions.Categorical(preds)
+    preds = dist.sample()
+
+    ''' TRY MEDIAN FILTERING HERE '''
+
+    #_, preds = torch.max(output, 1)
+    #output = output.squeeze(0).permute(1,2,0).detach().numpy()
     #real = [[0 for i in range(1024)] for j in range(1024)]
     #for i in range(1024):
     #    for j in range(1024):
