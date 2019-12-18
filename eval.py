@@ -3,12 +3,12 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 import tqdm
-
+import cv2
 from unet_model import UNet
 
 #device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 device = 'cpu'
-best_model_name = 'sample_model.pt'
+best_model_name = 'best_model.pt'
 best_model = torch.load(best_model_name)
 
 model = UNet()
@@ -53,7 +53,8 @@ for i in range(len(test_images)):
     #_, preds = torch.max(output, 1)
     #print(real)
     preds = preds.squeeze(0)
-    plt.imshow(preds.cpu())
+    preds = cv2.medianBlur(np.float32(preds.numpy()), 5)
+    plt.imshow(preds)
     plt.clim(0,3)
     #np.savetxt(os.path.join(out_dir, f"{i}.csv"), np.array(real), delimiter=',')
     plt.show()
